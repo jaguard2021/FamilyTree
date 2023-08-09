@@ -1,0 +1,248 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract FamilyTree {
+    enum Role { Owner, Parent, Member }
+
+    struct Location {
+        string latitude;
+        string longitude;
+        string description;
+    }
+
+    struct Person {
+        string name;
+        string comments;
+        string group;
+        string birthDate;
+        string deathDate;
+        Location birthLocation;
+        Location currentLocation;
+        address[] children;
+        address[] parents;
+        address[] relatives;
+    }
+
+    struct Transaction {
+        address user;
+        string action;
+        uint256 timestamp;
+    }
+
+    mapping(address => Person) public people;
+    mapping(address => address) public parent;
+    mapping(address => Role) public userRoles;
+    Transaction[] public transactionHistory;
+
+    address[] public owners;
+
+    constructor() {
+        owners.push(msg.sender);
+        userRoles[msg.sender] = Role.Owner;
+    }
+
+    modifier onlyOwner() {
+        require(userRoles[msg.sender] == Role.Owner, "Only owners can perform this action");
+        _;
+    }
+
+    modifier onlyRole(Role _role) {
+        require(userRoles[msg.sender] == _role, "Insufficient role");
+        _;
+    }
+
+    event PersonAdded(address indexed user, string name, address[] children, string group, string birthDate, string deathDate, address[] parents, address[] relatives, Location birthLocation, Location currentLocation, uint256 timestamp);
+    event OwnershipTransferred(address indexed from, address indexed to, uint256 timestamp);
+    event NameUpdated(address indexed user, string newName, uint256 timestamp);
+    event CommentAdded(address indexed user, string comment, uint256 timestamp);
+
+    function addOwner(address _newOwner) public onlyOwner {
+        owners.push(_newOwner);
+        userRoles[_newOwner] = Role.Owner;
+    }
+
+    function addPerson(string memory _name, string memory _group, string memory _birthDate, string memory _deathDate, Location memory _birthLocation, Location memory _currentLocation, address[] memory _parents, address[] memory _relatives) public onlyRole(Role.Owner) {
+        require(people[msg.sender].children.length == 0, "Person already exists");
+
+        people[msg.sender] = Person({
+            name: _name,
+            comments: "",
+            group: _group,
+            birthDate: _birthDate,
+            deathDate: _deathDate,
+            birthLocation: _birthLocation,
+            currentLocation: _currentLocation,
+            children: new address[](0),
+            parents: _parents,
+            relatives: _relatives
+        });
+
+        for (uint256 i = 0; i < _parents.length; i++) {
+            parent[_parents[i]] = msg.sender;
+        }
+
+        transactionHistory.push(Transaction({
+            user: msg.sender,
+            action: "Add Person",
+            timestamp: block.timestamp
+        }));
+
+        emit PersonAdded(msg.sender, _name, new address[](0), _group, _birthDate, _deathDate, _parents, _relatives, _birthLocation, _currentLocation, block.timestamp);
+    }
+
+    function transferOwnership(address _newOwner) public onlyOwner {
+        require(people[_newOwner].children.length == 0, "New owner already has a family");
+
+        people[_newOwner] = people[msg.sender];
+        delete people[msg.sender];
+
+        for (uint256 i = 0; i < people[_newOwner].children.length; i++) {
+            parent[people[_newOwner].children[i]] = _newOwner;
+        }
+
+        transactionHistory.push(Transaction({
+            user: msg.sender,
+            action: "Transfer Ownership",
+            timestamp: block.timestamp
+        }));
+
+        emit OwnershipTransferred(msg.sender, _newOwner, block.timestamp);
+    }
+
+    function updatePersonName(string memory _newName) public onlyRole(Role.Parent) {
+        require(bytes(_newName).length > 0, "Name should not be empty");
+
+        people[msg.sender].name = _newName;
+
+        transactionHistory.push(Transaction({
+            user: msg.sender,
+            action: "Update Name",
+            timestamp: block.timestamp
+        }));
+
+        emit NameUpdated(msg.sender, _newName, block.timestamp);
+    }
+
+    function addComment(string memory _comment) public onlyRole(Role.Member) {
+        require(bytes(_comment).length > 0, "Comment should not be empty");
+        
+        people[msg.sender].comments = _comment;
+
+        transactionHistory.push(Transaction({
+            user: msg.sender,
+            action: "Add Comment",
+            timestamp: block.timestamp
+        }));
+
+        emit CommentAdded(msg.sender, _comment, block.timestamp);
+    }
+
+    function searchPerson(
+        string memory _name,
+        string memory _birthDate,
+        string memory _birthLocation,
+        address _parent,
+        address _child
+    )
+        public
+        view
+        returns (address[] memory)
+    {
+        address[] memory result;
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < owners.length; i++) {
+            Person memory person = people[owners[i]];
+            bool matches = false;
+
+            if (bytes(_name).length > 0 && keccak256(bytes(person.name)) == keccak256(bytes(_name))) {
+                matches = true;
+            }
+            
+            if (bytes(_birthDate).length > 0 && keccak256(bytes(person.birthDate)) == keccak256(bytes(_birthDate))) {
+                matches = true;
+            }
+            
+            if (bytes(_birthLocation).length > 0 && keccak256(bytes(person.birthLocation.description)) == keccak256(bytes(_birthLocation))) {
+                matches = true;
+            }
+            
+            if (_parent != address(0)) {
+                for (uint256 j = 0; j < person.parents.length; j++) {
+                    if (person.parents[j] == _parent) {
+                        matches = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (_child != address(0)) {
+                for (uint256 j = 0; j < person.children.length; j++) {
+                    if (person.children[j] == _child) {
+                        matches = true;
+                        break;
+                    }
+                }
+            }
+
+            if (matches) {
+                count++;
+            }
+        }
+
+        result = new address[](count);
+        count = 0;
+
+        for (uint256 i = 0; i < owners.length; i++) {
+            Person memory person = people[owners[i]];
+            bool matches = false;
+
+            if (bytes(_name).length > 0 && keccak256(bytes(person.name)) == keccak256(bytes(_name))) {
+                matches = true;
+            }
+            
+            if (bytes(_birthDate).length > 0 && keccak256(bytes(person.birthDate)) == keccak256(bytes(_birthDate))) {
+                matches = true;
+            }
+            
+            if (bytes(_birthLocation).length > 0 && keccak256(bytes(person.birthLocation.description)) == keccak256(bytes(_birthLocation))) {
+                matches = true;
+            }
+            
+            if (_parent != address(0)) {
+                for (uint256 j = 0; j < person.parents.length; j++) {
+                    if (person.parents[j] == _parent) {
+                        matches = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (_child != address(0)) {
+                for (uint256 j = 0; j < person.children.length; j++) {
+                    if (person.children[j] == _child) {
+                        matches = true;
+                        break;
+                    }
+                }
+            }
+
+            if (matches) {
+                result[count] = owners[i];
+                count++;
+            }
+        }
+
+        return result;
+    }
+
+    function getTransactionHistoryLength() public view returns (uint256) {
+        return transactionHistory.length;
+    }
+
+    function getTransaction(uint256 index) public view returns (address user, string memory action, uint256 timestamp) {
+        require(index < transactionHistory.length, "Invalid index");
+        Transaction memory txRecord = transactionHistory[index];
+        return (txRecord.user, txRecord.action, txRecord.timestamp);
+    }
+}
